@@ -1,0 +1,75 @@
+name: Build GCP Security Hardener Mac App
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    # --- BUILD BACKEND ---
+    - name: Install Python Dependencies
+      working-directory: ./backend
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+
+    - name: Build Backend Executable
+      working-directory: ./backend
+      run: |
+        pyinstaller --clean build_backend.spec
+        # Check if binary exists
+        if [ -f "dist/gcp-scanner-backend/gcp-scanner-backend" ]; then
+           echo "Backend binary created successfully"
+        else
+           echo "Backend binary creation failed"
+           ls -R dist
+           exit 1
+        fi
+        chmod +x dist/gcp-scanner-backend/gcp-scanner-backend
+
+    # --- BUILD FRONTEND & ELECTRON ---
+    - name: Install Root Dependencies
+      run: npm install --force
+
+    # Skipped frontend build since we committed 'frontend/out'
+
+    - name: Build Electron App (Mac)
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        npx electron-builder --mac
+
+    # --- UPLOAD ARTIFACTS ---
+    - name: Upload Mac DMG
+      uses: actions/upload-artifact@v4
+      with:
+        name: GCP-Security-Hardener-Mac-DMG
+        path: dist/*.dmg
+        if-no-files-found: warn
+
+    - name: Upload Mac Zip
+      uses: actions/upload-artifact@v4
+      with:
+        name: GCP-Security-Hardener-Mac-Zip
+        path: dist/*.zip
+        if-no-files-found: warn

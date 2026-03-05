@@ -1,0 +1,43 @@
+        {/* Step Content with fixed height and buttons inside */}
+        <div className="bg-white rounded-lg shadow-lg p-8 h-[500px] flex flex-col">
+          <div className="flex-1 overflow-auto">
+            {currentStep === 1 && (
+              <Step1
+                value={data.alertEmail}
+                onChange={(value) => updateData('alertEmail', value)}
+              />
+            )}
+            {currentStep === 2 && (
+              <Step2
+                value={data.region}
+                onChange={(value) => updateData('region', value)}
+              />
+            )}
+            {currentStep === 3 && (
+              <Step3
+                value={data.finOpsConcern}
+                onChange={(value) => updateData('finOpsConcern', value)}
+              />
+            )}
+          </div>
+
+          {/* Navigation Buttons - inside card for consistent positioning */}
+          <div className="flex justify-end gap-3 mt-6 pt-6 border-t border-gray-200">
+            {currentStep > 1 && (
+              <button
+                onClick={handleBack}
+                className="flex items-center gap-2 px-6 py-3 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition-colors"
+              >
+                <ChevronLeft className="w-5 h-5" />
+                Back
+              </button>
+            )}
+            <button
+              onClick={handleNext}
+              className="flex items-center gap-2 px-8 py-3 bg-primary-600 text-white rounded-lg font-medium hover:bg-primary-700 transition-colors min-w-[200px] justify-center"
+            >
+              {currentStep === totalSteps ? 'Complete' : 'Next'}
+              {currentStep < totalSteps && <ChevronRight className="w-5 h-5" />}
+            </button>
+          </div>
+        </div>

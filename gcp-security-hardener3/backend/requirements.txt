@@ -1,0 +1,56 @@
+# FastAPI and Web Framework
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+pydantic==2.5.3
+pydantic-settings==2.1.0
+python-multipart==0.0.6
+
+# Google Cloud Platform Libraries
+google-cloud-resource-manager==1.10.4
+google-cloud-billing==1.13.0
+google-cloud-billing-budgets==1.13.0
+google-cloud-service-usage==1.12.0
+google-cloud-iam==2.16.0
+google-cloud-recommender==2.7.0
+google-cloud-logging==3.8.0
+google-cloud-pubsub==2.18.4
+google-cloud-compute
+google-cloud-monitoring
+google-cloud-org-policy
+# google-cloud-functions-framework==3.5.0  # Only needed for Cloud Functions, not Cloud Run
+google-api-python-client==2.108.0
+google-auth==2.26.2
+google-auth-oauthlib==1.2.0
+google-auth-httplib2==0.2.0
+
+# Firebase Admin SDK (for token verification)
+firebase-admin==6.4.0
+
+# HTTP and Utilities
+httpx==0.26.0
+python-jose[cryptography]==3.3.0
+python-dotenv==1.0.0
+
+# PDF Generation (for Outcomes Report)
+reportlab==4.1.0
+fpdf2==2.7.6
+
+# Async Support
+aiofiles==23.2.1
+
+# Logging and Monitoring
+structlog==24.1.0
+
+# Google Generative AI (Gemini)
+google-genai
+
+# Anthropic Claude AI
+anthropic==0.34.2
+
+# Rate Limiting
+slowapi==0.1.9
+
+# Email Validation (for Pydantic EmailStr)
+email-validator==2.3.0
+google-cloud-asset
+pyinstaller

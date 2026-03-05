@@ -1,0 +1,110 @@
+{
+  "name": "gcp-security-hardener",
+  "version": "1.5.0",
+  "description": "GCP Security Hardening Tool with JIT Privilege Escalation",
+  "main": "electron-main.js",
+  "author": "Pete",
+  "license": "MIT",
+  "scripts": {
+    "electron": "electron .",
+    "dev": "cd frontend && npm run dev",
+    "electron:dev": "NODE_ENV=development electron .",
+    "build:frontend": "cd frontend && npm run build",
+    "build:backend": "cd backend && pyinstaller build_backend.spec --noconfirm --clean",
+    "build:mac": "npm run build:backend && npm run build:frontend && electron-builder --mac",
+    "build:mac-universal": "npm run build:backend && npm run build:frontend && electron-builder --mac --universal",
+    "build:dmg": "npm run build:backend && npm run build:frontend && electron-builder --mac dmg",
+    "build:win": "npm run build:backend && npm run build:frontend && electron-builder --win",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "build": {
+    "appId": "com.gcpsecurity.hardener",
+    "productName": "GCP Security Hardener",
+    "copyright": "Copyright © 2026",
+    "directories": {
+      "output": "dist",
+      "buildResources": "assets"
+    },
+    "asarUnpack": [],
+    "extraResources": [
+      {
+        "from": "backend/dist/gcp-scanner-backend",
+        "to": "backend/gcp-scanner-backend",
+        "filter": [
+          "**/*"
+        ]
+      },
+      "GCP_SECURITY_HARDENING_README.md",
+      "GCP_SECURITY_SCANNER_TECHNICAL_README.md"
+    ],
+    "files": [
+      "electron-main.js",
+      "frontend/out/**/*",
+      "assets/**/*"
+    ],
+    "extraFiles": [
+      {
+        "from": "docs",
+        "to": "Documentation",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "mac": {
+      "identity": null,
+      "category": "public.app-category.developer-tools",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.png",
+      "entitlements": "assets/entitlements.mac.plist",
+      "entitlementsInherit": "assets/entitlements.mac.plist",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.png"
+    },
+    "dmg": {
+      "title": "GCP Security Hardener ${version}",
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ],
+      "window": {
+        "width": 540,
+        "height": 380
+      }
+    }
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "electron": "^28.1.3",
+    "electron-builder": "^24.9.1",
+    "wait-on": "^7.2.0"
+  }
+}
