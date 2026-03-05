@@ -26,6 +26,19 @@ jobs:
           workload_identity_provider: '${{ secrets.WIF_PROVIDER_NAME }}'
           service_account: '${{ secrets.DEPLOYMENT_SA_EMAIL }}'
 
+      - name: Authenticate Docker to Google Artifact Registry
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev
+
+      - name: Build and Push Frontend
+        run: |
+          docker build -t us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/repo/frontend:${{ github.sha }} -f gcp-security-hardener3/frontend/Dockerfile.frontend gcp-security-hardener3/frontend
+          docker push us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/repo/frontend:${{ github.sha }}
+
+      - name: Build and Push Backend
+        run: |
+          docker build -t us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/repo/backend:${{ github.sha }} -f gcp-security-hardener3/backend/Dockerfile.backend gcp-security-hardener3/backend
+          docker push us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/repo/backend:${{ github.sha }}
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
@@ -39,8 +52,8 @@ jobs:
         working-directory: ./terraform
         run: terraform plan -out=tfplan
         env:
-          TF_VAR_frontend_image: '${{ secrets.FRONTEND_IMAGE }}'
-          TF_VAR_backend_image: '${{ secrets.BACKEND_IMAGE }}'
+          TF_VAR_frontend_image: 'us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/repo/frontend:${{ github.sha }}'
+          TF_VAR_backend_image: 'us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/repo/backend:${{ github.sha }}'
           TF_VAR_iap_client_id: '${{ secrets.IAP_CLIENT_ID }}'
           TF_VAR_iap_client_secret: '${{ secrets.IAP_CLIENT_SECRET }}'
 
@@ -48,7 +61,7 @@ jobs:
         working-directory: ./terraform
         run: terraform apply -auto-approve tfplan
         env:
-          TF_VAR_frontend_image: '${{ secrets.FRONTEND_IMAGE }}'
-          TF_VAR_backend_image: '${{ secrets.BACKEND_IMAGE }}'
+          TF_VAR_frontend_image: 'us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/repo/frontend:${{ github.sha }}'
+          TF_VAR_backend_image: 'us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/repo/backend:${{ github.sha }}'
           TF_VAR_iap_client_id: '${{ secrets.IAP_CLIENT_ID }}'
           TF_VAR_iap_client_secret: '${{ secrets.IAP_CLIENT_SECRET }}'

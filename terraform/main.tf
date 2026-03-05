@@ -26,18 +26,25 @@ data "google_project" "project" {}
 # 1. Identity & Access Management (WIF & Service Accounts)
 # ==============================================================================
 
-# Runtime Service Account for Cloud Run
-resource "google_service_account" "runtime_sa" {
-  account_id   = "app-runtime-sa"
-  display_name = "Cloud Run Application Runtime Service Account"
-  description  = "Dedicated service account for the frontend and backend Cloud Run services."
+# Runtime Service Account for Backend Cloud Run
+resource "google_service_account" "backend_sa" {
+  account_id   = "backend-runtime-sa"
+  display_name = "Backend Runtime Service Account"
+  description  = "Dedicated service account for the FastAPI backend service."
 }
 
-# Give runtime SA token creator role so it can impersonate other SAs
-resource "google_project_iam_member" "runtime_sa_token_creator" {
+# Runtime Service Account for Frontend Cloud Run
+resource "google_service_account" "frontend_sa" {
+  account_id   = "frontend-runtime-sa"
+  display_name = "Frontend Runtime Service Account"
+  description  = "Dedicated service account for the Next.js frontend service."
+}
+
+# Give backend SA token creator role so it can impersonate other SAs for scanning
+resource "google_project_iam_member" "backend_sa_token_creator" {
   project = var.project_id
   role    = "roles/iam.serviceAccountTokenCreator"
-  member  = "serviceAccount:${google_service_account.runtime_sa.email}"
+  member  = "serviceAccount:${google_service_account.backend_sa.email}"
 }
 
 # Deployment Service Account for GitHub Actions
@@ -120,17 +127,7 @@ resource "google_compute_subnetwork" "connector_subnet" {
   network       = google_compute_network.custom_vpc.id
 }
 
-# Serverless VPC Access Connector
-resource "google_vpc_access_connector" "connector" {
-  name   = "app-vpc-connector"
-  region = var.region
-  subnet {
-    name = google_compute_subnetwork.connector_subnet.name
-  }
-  machine_type  = "e2-micro"
-  min_instances = 2
-  max_instances = 3
-}
+# (Serverless VPC Access Connector removed in favor of Direct VPC Egress)
 
 # Cloud Router and NAT for outbound internet access from the VPC
 resource "google_compute_router" "router" {
@@ -280,18 +277,18 @@ resource "google_compute_backend_service" "backend_bs" {
 }
 
 # Allow Workspace domain to bypass IAP for the Backend Service
-resource "google_iap_web_backend_service_iam_member" "frontend_iap_access" {
+resource "google_iap_web_backend_service_iam_binding" "frontend_iap_access" {
   project             = var.project_id
   web_backend_service = google_compute_backend_service.frontend_bs.name
   role                = "roles/iap.httpsResourceAccessor"
-  member              = "domain:${var.authorized_domain}"
+  members             = ["domain:${var.authorized_domain}"]
 }
 
-resource "google_iap_web_backend_service_iam_member" "backend_iap_access" {
+resource "google_iap_web_backend_service_iam_binding" "backend_iap_access" {
   project             = var.project_id
   web_backend_service = google_compute_backend_service.backend_bs.name
   role                = "roles/iap.httpsResourceAccessor"
-  member              = "domain:${var.authorized_domain}"
+  members             = ["domain:${var.authorized_domain}"]
 }
 
 # URL Map (Routing rules)
