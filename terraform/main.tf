@@ -156,11 +156,14 @@ resource "google_cloud_run_v2_service" "backend" {
   ingress  = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
 
   template {
-    service_account = google_service_account.runtime_sa.email
+    service_account = google_service_account.backend_sa.email
 
     vpc_access {
-      connector = google_vpc_access_connector.connector.id
-      egress    = "ALL_TRAFFIC"
+      network_interfaces {
+        network    = google_compute_network.custom_vpc.id
+        subnetwork = google_compute_subnetwork.app_subnet.id
+      }
+      egress = "ALL_TRAFFIC"
     }
 
     containers {
@@ -179,11 +182,14 @@ resource "google_cloud_run_v2_service" "frontend" {
   ingress  = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
 
   template {
-    service_account = google_service_account.runtime_sa.email
+    service_account = google_service_account.frontend_sa.email
 
     vpc_access {
-      connector = google_vpc_access_connector.connector.id
-      egress    = "ALL_TRAFFIC"
+      network_interfaces {
+        network    = google_compute_network.custom_vpc.id
+        subnetwork = google_compute_subnetwork.app_subnet.id
+      }
+      egress = "ALL_TRAFFIC"
     }
 
     containers {
