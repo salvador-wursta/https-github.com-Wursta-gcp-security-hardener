@@ -23,7 +23,7 @@ jobs:
         uses: google-github-actions/auth@v2
         with:
           project_id: '${{ secrets.GCP_PROJECT_ID }}'
-          workload_identity_provider: '${{ secrets.WIF_PROVIDER_NAME }}'
+          workload_identity_provider: 'projects/722595657772/locations/global/workloadIdentityPools/github-actions-pool-v2/providers/github-repo-provider'
           service_account: '${{ secrets.DEPLOYMENT_SA_EMAIL }}'
 
       - name: Authenticate Docker to Google Artifact Registry
