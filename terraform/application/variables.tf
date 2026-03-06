@@ -23,7 +23,7 @@ variable "backend_image" {
 variable "iap_domain" {
   description = "The domain name for the Load Balancer (e.g., demo.wursta.com)"
   type        = string
-  default     = "demo.wursta.com"
+  default     = "34.8.226.12.nip.io"
 }
 
 variable "authorized_domain" {
