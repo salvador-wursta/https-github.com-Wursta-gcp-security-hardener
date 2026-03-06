@@ -57,6 +57,11 @@ class ScanService:
         api_analysis_result: Dict[str, Any] = None
         unused_apis_model: UnusedAPIsInfo = None
         billing_info: BillingInfo = None
+        
+        # Diagnostic traces to find out why tasks aren't being captured
+        traces = []
+        traces.append(f"Starting Scan for {self.gcp_client.project_id}. Modules requested: {scan_modules}")
+        
         gpu_quota_info: GPUQuotaInfo = None
         compute_instance_info: ComputeInstanceInfo = None
         iam_analysis_result: Dict[str, Any] = None
@@ -247,13 +252,17 @@ class ScanService:
             )] = 'iam_foundation'
             
             if should_run('iam'):
+                traces.append("Submitting iam_deep task")
                 future_to_task[executor.submit(
                     self._analyze_iam_deep, organization_id
                 )] = 'iam_deep'
                 
+                traces.append("Submitting iam_admin_audit task")
                 future_to_task[executor.submit(
                      self._audit_org_admin, organization_id
                 )] = 'iam_admin_audit'
+            else:
+                traces.append("Skipping iam module (should_run=False)")
             
             future_to_task[executor.submit(
                 self._audit_change_control
@@ -337,12 +346,15 @@ class ScanService:
                             compute_instance_info = result.get('model')
                         elif task_name == 'iam_deep':
                             iam_analysis_result = result.get('data')
+                            traces.append(f"Collected iam_deep result. Data present: {iam_analysis_result is not None}")
                         elif task_name == 'monitoring':
                             monitoring_results = result.get('data')
                         elif task_name == 'change_control':
                             change_control_info = result.get('data')
                         elif task_name == 'scc_analysis':
                             scc_info_model = result.get('model')
+                        
+                        traces.append(f"Processed task: {task_name}")
                     
                 except Exception as e:
                     logger.error(f"Task {task_name} failed: {str(e)}", exc_info=True)
@@ -407,7 +419,7 @@ class ScanService:
             summary=summary,
             enabled_apis=enabled_apis,
             scan_status="completed",
-            errors=errors,
+            errors=errors + [f"[TRACE] {t}" for t in traces],
             billing_info=billing_info,
             gpu_quota=gpu_quota_info,
             compute_instances=compute_instance_info,
@@ -844,6 +856,9 @@ class ScanService:
         try:
             iam_service = IamAnalysisService(self.gcp_client)
             iam_data = iam_service.analyze_iam(self.gcp_client.project_id)
+            
+            # Trace trace trace
+            logger.info(f"[IAM TRACE] Data keys: {list(iam_data.keys()) if iam_data else 'None'}")
             
             # Assign early so frontend gets data even if narrative/risk parsing crashes
             result['data'] = iam_data
