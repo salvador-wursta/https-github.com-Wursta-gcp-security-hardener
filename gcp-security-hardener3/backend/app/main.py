@@ -264,9 +264,10 @@ def validate_permissions(sa_email: str, target_id: str, scope: str = "project"):
 
     # Permissions we test — one per required role
     permission_to_role = {
-        "resourcemanager.projects.get":      "roles/browser",
-        "iam.roles.get":                     "roles/iam.securityReviewer",
-        "securitycenter.assets.list":        "roles/securitycenter.adminViewer",
+        "resourcemanager.projects.getIamPolicy": "roles/iam.securityReviewer",
+        "iam.serviceAccounts.list":              "roles/iam.serviceAccountViewer",
+        "securitycenter.assets.list":            "roles/securitycenter.adminViewer",
+        "resourcemanager.projects.get":          "roles/browser",
     }
     results = {role: False for role in permission_to_role.values()}
     results["roles/billing.viewer"] = True  # billing.viewer is at billing-account level, treated as optional

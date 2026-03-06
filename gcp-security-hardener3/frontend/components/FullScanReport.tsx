@@ -28,8 +28,7 @@ export default function FullScanReport({ scanResults, selectedModules, onClose, 
             setPdfError(null);
 
             // Step 1: POST scan results → backend generates PDF, saves to /tmp, returns download_id
-            const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
-            const res = await fetch(`${backendUrl}/api/v1/report/generate-pdf`, {
+            const res = await fetch('/api/v1/report/generate-pdf', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(scanResults),

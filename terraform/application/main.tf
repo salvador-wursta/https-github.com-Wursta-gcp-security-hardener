@@ -153,7 +153,7 @@ resource "google_cloud_run_v2_service" "frontend" {
       }
       env {
         name  = "NEXT_PUBLIC_BACKEND_URL"
-        value = "https://${var.iap_domain}/api"
+        value = "https://${var.iap_domain}"
       }
     }
   }
