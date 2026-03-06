@@ -33,7 +33,6 @@ resource "google_project_iam_member" "deployment_sa_roles" {
     "roles/iam.serviceAccountAdmin",
     "roles/resourcemanager.projectIamAdmin",
     "roles/artifactregistry.writer",
-    "roles/storage.admin",
   ])
   project = var.project_id
   role    = each.key
@@ -45,6 +44,13 @@ resource "google_iam_workload_identity_pool" "github_pool" {
   workload_identity_pool_id = "github-actions-pool"
   display_name              = "GitHub Actions Pool"
   description               = "Identity pool for GitHub Actions deployments"
+}
+
+# Grant bucket-level access for Terraform remote state
+resource "google_storage_bucket_iam_member" "tfstate_bucket_access" {
+  bucket = "demot-test-tfstate"
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.deployment_sa.email}"
 }
 
 # Workload Identity Provider
