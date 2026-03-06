@@ -272,6 +272,10 @@ resource "google_compute_managed_ssl_certificate" "default" {
   managed {
     domains = [var.iap_domain]
   }
+  
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 # HTTPS Target Proxy
