@@ -33,6 +33,7 @@ resource "google_project_iam_member" "deployment_sa_roles" {
     "roles/iam.serviceAccountAdmin",
     "roles/resourcemanager.projectIamAdmin",
     "roles/artifactregistry.writer",
+    "roles/storage.admin",
   ])
   project = var.project_id
   role    = each.key
