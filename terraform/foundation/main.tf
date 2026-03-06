@@ -41,7 +41,7 @@ resource "google_project_iam_member" "deployment_sa_roles" {
 
 # Workload Identity Pool
 resource "google_iam_workload_identity_pool" "github_pool" {
-  workload_identity_pool_id = "github-actions-pool"
+  workload_identity_pool_id = "github-actions-pool-v2"
   display_name              = "GitHub Actions Pool"
   description               = "Identity pool for GitHub Actions deployments"
 }
