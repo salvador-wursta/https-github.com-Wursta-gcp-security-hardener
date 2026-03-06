@@ -45,11 +45,11 @@ jobs:
           terraform_version: "1.7.0"
 
       - name: Terraform Init
-        working-directory: ./terraform
+        working-directory: ./terraform/application
         run: terraform init
 
       - name: Terraform Plan
-        working-directory: ./terraform
+        working-directory: ./terraform/application
         run: terraform plan -out=tfplan
         env:
           TF_VAR_frontend_image: 'us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/repo/frontend:${{ github.sha }}'
@@ -58,7 +58,7 @@ jobs:
           TF_VAR_iap_client_secret: '${{ secrets.IAP_CLIENT_SECRET }}'
 
       - name: Terraform Apply
-        working-directory: ./terraform
+        working-directory: ./terraform/application
         run: terraform apply -auto-approve tfplan
         env:
           TF_VAR_frontend_image: 'us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/repo/frontend:${{ github.sha }}'
