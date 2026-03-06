@@ -232,16 +232,26 @@ def activate_session(req: SessionActivateRequest):
     Stores the scanner SA email in the shared session dict so all subsequent
     scans use it via impersonation.
 
-    IMPORTANT: This is intentionally instant — it does NOT wait for IAM propagation.
-    Previous versions had a 45-second blocking retry loop here that caused the UI
-    to hang. IAM propagation (usually < 60s) is handled transparently by the scan
-    endpoint itself when it builds GCPClient with the impersonate_email.
+    IMPORTANT: We call ensure_token_creator() here (best-effort) so that BOTH
+    new SAs and pre-existing SAs always have the backend ADC granted
+    roles/iam.serviceAccountTokenCreator before the first scan runs.
+    Without this, existing SAs fail with getAccessToken 403 because
+    identity_service.create_session_identity() is NOT called for them.
     """
+    # Best-effort: grant TokenCreator to the backend ADC on the scanner SA.
+    # Never blocks activation even if it fails.
+    try:
+        from app.services.identity_service import ensure_token_creator
+        ensure_token_creator(req.sa_email)
+    except Exception as e:
+        print(f"[session] TokenCreator grant failed (non-fatal) for {req.sa_email}: {e}")
+
     _active_session["sa_email"] = req.sa_email
     _active_session["target_id"] = req.target_id
     _active_session["scope"] = req.scope
     print(f"[session] activate → set scanner SA to {req.sa_email} for target {req.target_id}")
     return {"status": "ok"}
+
 
 
 

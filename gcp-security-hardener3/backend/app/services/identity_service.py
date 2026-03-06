@@ -53,6 +53,107 @@ def _sanitize_name(raw: str, max_len: int = 21) -> str:
     return slug[:max_len].rstrip("-") or "client"
 
 
+def ensure_token_creator(sa_email: str) -> None:
+    """
+    Ensures the current ADC identity (developer email locally, Cloud Run
+    runtime SA in production) has roles/iam.serviceAccountTokenCreator
+    on the given scanner SA.
+
+    This MUST be called every time a scanner SA is activated — not just
+    when it is first created — so that existing SAs work correctly too.
+
+    This is a best-effort call: it logs failures but never raises, so the
+    caller (session/activate) is never blocked.
+    """
+    try:
+        credentials, project_id = _get_credentials_without_firebase()
+    except Exception as e:
+        print(f"[ensure_token_creator] ADC resolution failed: {e}")
+        return
+
+    # ── Resolve the current ADC caller identity ──────────────────────────────
+    # Priority 1: SA attributes (works in Cloud Run / Workload Identity)
+    caller_email = (
+        getattr(credentials, "service_account_email", None)
+        or getattr(credentials, "signer_email", None)
+        or getattr(credentials, "_service_account_email", None)
+    )
+
+    # Priority 2: gcloud CLI active account (works locally)
+    if not caller_email or caller_email == "default":
+        try:
+            import subprocess as _sp
+            res = _sp.run(
+                ["gcloud", "config", "get-value", "account"],
+                capture_output=True, text=True, timeout=5
+            )
+            gcloud_account = res.stdout.strip()
+            if gcloud_account and gcloud_account != "(unset)":
+                caller_email = gcloud_account
+        except Exception as gcloud_err:
+            print(f"[ensure_token_creator] gcloud account lookup failed: {gcloud_err}")
+
+    # Priority 3: tokeninfo API (OAuth user credentials)
+    if not caller_email:
+        try:
+            from google.auth.transport.requests import Request
+            import requests as _req
+            credentials.refresh(Request())
+            res = _req.get(
+                f"https://www.googleapis.com/oauth2/v3/tokeninfo?access_token={credentials.token}",
+                timeout=5,
+            )
+            if res.status_code == 200:
+                caller_email = res.json().get("email")
+        except Exception as tok_err:
+            print(f"[ensure_token_creator] tokeninfo lookup failed: {tok_err}")
+
+    if not caller_email:
+        print("[ensure_token_creator] Could not resolve ADC identity — skipping TokenCreator grant.")
+        return
+
+    member_type = "serviceAccount" if caller_email.endswith(".gserviceaccount.com") else "user"
+    member_str = f"{member_type}:{caller_email}"
+
+    # ── Apply the IAM binding ─────────────────────────────────────────────────
+    try:
+        # Resolve the host project the SA lives in (extracted from the SA email)
+        # sa_email format: <account-id>@<project-id>.iam.gserviceaccount.com
+        sa_project = sa_email.split("@")[-1].replace(".iam.gserviceaccount.com", "")
+        full_resource = f"projects/{sa_project}/serviceAccounts/{sa_email}"
+
+        iam = discovery.build("iam", "v1", credentials=credentials, cache_discovery=False)
+
+        policy = iam.projects().serviceAccounts().getIamPolicy(resource=full_resource).execute()
+        if "bindings" not in policy:
+            policy["bindings"] = []
+
+        role = "roles/iam.serviceAccountTokenCreator"
+        binding_found = False
+        for binding in policy["bindings"]:
+            if binding.get("role") == role:
+                binding_found = True
+                if member_str not in binding.get("members", []):
+                    binding["members"].append(member_str)
+                    print(f"[ensure_token_creator] Added {member_str} to existing TokenCreator binding on {sa_email}")
+                else:
+                    print(f"[ensure_token_creator] {member_str} already has TokenCreator on {sa_email} — no change needed.")
+                break
+
+        if not binding_found:
+            policy["bindings"].append({"role": role, "members": [member_str]})
+            print(f"[ensure_token_creator] Created new TokenCreator binding for {member_str} on {sa_email}")
+
+        iam.projects().serviceAccounts().setIamPolicy(
+            resource=full_resource,
+            body={"policy": policy}
+        ).execute()
+        print(f"[ensure_token_creator] ✓ TokenCreator IAM binding applied for {member_str} on {sa_email}")
+
+    except Exception as e:
+        print(f"[ensure_token_creator] Failed to set TokenCreator on {sa_email}: {e}")
+
+
 def create_session_identity(domain: str) -> dict:
     """
     Creates a brand-new per-customer scanner Service Account in OUR GCP project.
@@ -189,6 +290,33 @@ def create_session_identity(domain: str) -> dict:
                 body={'policy': policy}
             ).execute()
             print("[identity_service] Token Creator binding applied successfully.")
+            
+            # Wait for IAM propagation before returning to prevent immediate 403 errors
+            import time
+            from google.auth.transport.requests import Request
+            import requests as _req
+            
+            print(f"[identity_service] Waiting for IAM propagation (verifying Token Creator access for {sa_email})...")
+            max_wait_seconds = 45
+            for i in range(max_wait_seconds):
+                try:
+                    credentials.refresh(Request())
+                    iam_url = f"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{sa_email}:generateAccessToken"
+                    token_resp = _req.post(
+                        iam_url,
+                        headers={"Authorization": f"Bearer {credentials.token}"},
+                        json={"scope": ["https://www.googleapis.com/auth/cloud-platform"], "lifetime": "300s"},
+                        timeout=5,
+                    )
+                    if token_resp.status_code == 200:
+                        print(f"[identity_service] ✓ IAM propagation confirmed after {i} seconds!")
+                        break
+                except Exception as e:
+                    pass
+                time.sleep(1)
+            else:
+                print("[identity_service] ⚠️ Warning: Verification timed out. The SA might still fail on first use.")
+                
     except Exception as e:
         print(f"[identity_service] Could not automatically apply Token Creator binding: {e}")
 
