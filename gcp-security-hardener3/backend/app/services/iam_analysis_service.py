@@ -122,9 +122,12 @@ class IamAnalysisService:
                     seen.add(member)
                     
                     # Split member into type:id
-                    parts = member.split(':', 1)
-                    m_type = parts[0]
-                    m_id = parts[1] if len(parts) > 1 else member
+                    if ':' in member:
+                        m_type, m_id = member.split(':', 1)
+                    else:
+                        # Handle special members like allUsers, allAuthenticatedUsers
+                        m_type = "Special"
+                        m_id = member
                     
                     # Human-friendly type
                     display_type = {
@@ -132,8 +135,7 @@ class IamAnalysisService:
                         'group': 'Group',
                         'domain': 'Domain',
                         'serviceAccount': 'Service Account',
-                        'allUsers': 'Public (Any)',
-                        'allAuthenticatedUsers': 'Public (Authenticated)',
+                        'Special': 'Public (Any)' if m_id == 'allUsers' else ('Public (Authenticated)' if m_id == 'allAuthenticatedUsers' else 'Special'),
                         'deleted': 'Deleted Identity'
                     }.get(m_type, m_type.capitalize())
                     
