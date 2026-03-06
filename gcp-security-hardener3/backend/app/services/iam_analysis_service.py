@@ -26,36 +26,67 @@ class IamAnalysisService:
         
         iam_policy = self._get_iam_policy(project_id)
         service_accounts = self._list_service_accounts(project_id)
-        external_sa_principals = self._list_external_sa_principals(iam_policy)
-        human_principals = self._list_human_principals(iam_policy)
+        
+        # Sub-analysis with individual protection
+        external_sa_principals = []
+        try:
+            external_sa_principals = self._list_external_sa_principals(iam_policy)
+        except Exception as e:
+            logger.error(f"[IAM ANALYSIS] Failed listing external SAs: {e}")
+            
+        all_principals = []
+        try:
+            all_principals = self._list_all_principals(iam_policy)
+        except Exception as e:
+            logger.error(f"[IAM ANALYSIS] Failed listing all principals: {e}")
+
+        # Filter human principals for backward compatibility if needed, 
+        # but _list_all_principals is the new source of truth
+        human_principals = [p for p in all_principals if p['type'] in ['User', 'Group', 'Domain']]
         
         # Total SA count = SAs defined IN this project + external SAs granted access to it
         all_sa_count = len(service_accounts) + len(external_sa_principals)
         
         findings = {
-            'basic_roles': self._check_basic_roles(iam_policy),
-            'service_account_keys': self._check_service_account_keys(project_id, service_accounts),
-            'default_service_accounts': self._check_default_service_accounts(iam_policy),
-            'external_members': self._check_external_members(iam_policy, project_id),
+            'basic_roles': [],
+            'service_account_keys': [],
+            'default_service_accounts': [],
+            'external_members': [],
             'human_principals': human_principals,
+            'all_principals': all_principals,
             'service_account_count': all_sa_count,
             'local_service_accounts': [
-                {'email': sa['email'], 'display_name': sa.get('displayName', ''), 'source': 'local'}
+                {'email': sa.get('email', 'unknown'), 'display_name': sa.get('displayName', ''), 'source': 'local'}
                 for sa in service_accounts
             ],
             'external_sa_principals': external_sa_principals,
         }
         
+        # Guarded sub-checks
+        try: findings['basic_roles'] = self._check_basic_roles(iam_policy)
+        except Exception as e: logger.error(f"IAM check_basic_roles fail: {e}")
+        
+        try: findings['service_account_keys'] = self._check_service_account_keys(project_id, service_accounts)
+        except Exception as e: logger.error(f"IAM check_keys fail: {e}")
+        
+        try: findings['default_service_accounts'] = self._check_default_service_accounts(iam_policy)
+        except Exception as e: logger.error(f"IAM check_defaults fail: {e}")
+        
+        try: findings['external_members'] = self._check_external_members(iam_policy, project_id)
+        except Exception as e: logger.error(f"IAM check_external fail: {e}")
+        
         return findings
 
     def _get_iam_policy(self, project_id: str) -> Dict[str, Any]:
         try:
-            return self.crm_service.projects().getIamPolicy(
+            policy = self.crm_service.projects().getIamPolicy(
                 resource=project_id, 
                 body={}
             ).execute()
+            logger.info(f"[IAM ANALYSIS] Fetched policy for {project_id}. Bindings count: {len(policy.get('bindings', []))}. Policy keys: {list(policy.keys())}")
+            return policy
         except HttpError as e:
-            logger.error(f"[IAM ANALYSIS] Failed to get IAM policy: {e}")
+            logger.error(f"[IAM ANALYSIS] Failed to get IAM policy for {project_id}: {e}")
             return {}
 
     def _list_service_accounts(self, project_id: str) -> List[Dict[str, Any]]:
@@ -76,29 +107,56 @@ class IamAnalysisService:
             logger.error(f"[IAM ANALYSIS] Failed to list service accounts: {e}")
             return []
 
-    def _list_human_principals(self, policy: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _list_all_principals(self, policy: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
-        Extract all human users and groups from IAM policy bindings.
+        Extract ALL principals from IAM policy bindings (User, Group, Domain, SA, Special).
         """
         seen = set()
         principals = []
-        for binding in policy.get('bindings', []):
+        bindings = policy.get('bindings', [])
+        
+        for binding in bindings:
+            role = binding.get('role', 'unknown-role')
             for member in binding.get('members', []):
-                if (member.startswith('user:') or member.startswith('group:')) and member not in seen:
+                if member not in seen:
                     seen.add(member)
-                    email = member.split(':', 1)[1]
-                    principal_type = 'User' if member.startswith('user:') else 'Group'
-                    roles = [b['role'] for b in policy.get('bindings', []) if member in b.get('members', [])]
+                    
+                    # Split member into type:id
+                    parts = member.split(':', 1)
+                    m_type = parts[0]
+                    m_id = parts[1] if len(parts) > 1 else member
+                    
+                    # Human-friendly type
+                    display_type = {
+                        'user': 'User',
+                        'group': 'Group',
+                        'domain': 'Domain',
+                        'serviceAccount': 'Service Account',
+                        'allUsers': 'Public (Any)',
+                        'allAuthenticatedUsers': 'Public (Authenticated)',
+                        'deleted': 'Deleted Identity'
+                    }.get(m_type, m_type.capitalize())
+                    
+                    # Collect all roles for this member
+                    all_roles = []
+                    for b in bindings:
+                        if member in b.get('members', []):
+                            all_roles.append(b.get('role', 'unknown'))
                     
                     principals.append({
-                        'email': email,
+                        'email': m_id,
                         'member': member,
-                        'type': principal_type,
-                        'roles': roles,
+                        'type': display_type,
+                        'roles': all_roles,
                         'source': 'iam_policy'
                     })
-        logger.info(f"[IAM ANALYSIS] Found {len(principals)} human principals in IAM policy")
+        
+        logger.info(f"[IAM ANALYSIS] Found {len(principals)} total principals in IAM policy")
         return principals
+
+    def _list_human_principals(self, policy: Dict[str, Any]) -> List[Dict[str, Any]]:
+        # Keeping for compatibility but migrating to _list_all_principals
+        return [p for p in self._list_all_principals(policy) if p['type'] in ['User', 'Group', 'Domain']]
 
     def _list_external_sa_principals(self, policy: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
@@ -114,12 +172,13 @@ class IamAnalysisService:
                 if member.startswith('serviceAccount:') and member not in seen:
                     seen.add(member)
                     email = member.replace('serviceAccount:', '')
-                    # Determine if this SA belongs to a different project
-                    is_cross_project = not email.endswith(f".iam.gserviceaccount.com") or True
+                    # Collect all roles
+                    all_roles = [b.get('role', 'unknown') for b in policy.get('bindings', []) if member in b.get('members', [])]
+                    
                     principals.append({
                         'email': email,
                         'member': member,
-                        'roles': [b['role'] for b in policy.get('bindings', []) if member in b.get('members', [])],
+                        'roles': all_roles,
                         'source': 'external_grant',
                         'is_google_managed': email.endswith('@cloudservices.gserviceaccount.com') or
                                              email.endswith('@appspot.gserviceaccount.com') or
@@ -135,7 +194,8 @@ class IamAnalysisService:
         basic_roles = ['roles/owner', 'roles/editor', 'roles/viewer']
         
         for binding in policy.get('bindings', []):
-            role = binding['role']
+            role = binding.get('role')
+            if not role: continue
             if role in basic_roles:
                 for member in binding.get('members', []):
                     # Ignore our own JIT accounts/Google-managed SAs to reduce noise
@@ -199,7 +259,7 @@ class IamAnalysisService:
         # App Engine: [project-id]@appspot.gserviceaccount.com
         
         for binding in policy.get('bindings', []):
-            role = binding['role']
+            role = binding.get('role')
             if role == 'roles/editor': # Default role
                 for member in binding.get('members', []):
                     if '-compute@developer.gserviceaccount.com' in member or '@appspot.gserviceaccount.com' in member:
@@ -220,7 +280,7 @@ class IamAnalysisService:
         risky_domains = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com']
         
         for binding in policy.get('bindings', []):
-            role = binding['role']
+            role = binding.get('role', 'unknown')
             for member in binding.get('members', []):
                 if any(domain in member for domain in risky_domains):
                     risks.append({

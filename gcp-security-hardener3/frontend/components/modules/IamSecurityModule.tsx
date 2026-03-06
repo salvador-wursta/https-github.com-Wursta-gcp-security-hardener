@@ -35,15 +35,14 @@ export default function IamSecurityModule({ scanData }: IamSecurityModuleProps) 
     const enrichedSaKeys = enrich(saKeys, 'account');
     const enrichedExternal = enrich(externalMembers, 'member');
 
-    // Aggregate all SAs and human principals for display
+    // Aggregate all principals for display
+    const allPrincipals = iam_analysis.all_principals || [];
     const localSAs = iam_analysis.local_service_accounts || [];
-    const externalSAs = iam_analysis.external_sa_principals || [];
-    const humanPrincipals = iam_analysis.human_principals || [];
-    const allPrincipals = [
-        ...humanPrincipals.map((hp: any) => ({ email: hp.email, type: `${hp.type} (Human)`, roles: (hp.roles || []).join(', ') || 'Granted via IAM' })),
-        ...localSAs.map((sa: any) => ({ email: sa.email, type: 'Local SA', roles: 'Managed in Project' })),
-        ...externalSAs.map((sa: any) => ({ email: sa.email, type: 'External SA', roles: (sa.roles || []).join(', ') || 'Granted via IAM' }))
-    ];
+
+    // Summary counts
+    const saCount = allPrincipals.filter((p: any) => p.type === 'Service Account').length;
+    const humanCount = allPrincipals.filter((p: any) => ['User', 'Group', 'Domain'].includes(p.type)).length;
+    const publicCount = allPrincipals.filter((p: any) => p.type.includes('Public')).length;
 
     // Helper for risk badge
     const RiskBadge = ({ level }: { level: string }) => {
@@ -71,7 +70,7 @@ export default function IamSecurityModule({ scanData }: IamSecurityModuleProps) 
                     </div>
                     <div>
                         <p className="text-sm text-gray-500">Service Accounts</p>
-                        <p className="text-2xl font-bold text-gray-900">{iam_analysis.service_account_count}</p>
+                        <p className="text-2xl font-bold text-gray-900">{saCount}</p>
                     </div>
                 </div>
 
@@ -100,8 +99,8 @@ export default function IamSecurityModule({ scanData }: IamSecurityModuleProps) 
                         <Shield className={`w-6 h-6 ${externalMembers.length > 0 ? 'text-yellow-600' : 'text-green-600'}`} />
                     </div>
                     <div>
-                        <p className="text-sm text-gray-500">External Users</p>
-                        <p className="text-2xl font-bold text-gray-900">{externalMembers.length}</p>
+                        <p className="text-sm text-gray-500">Human Principals</p>
+                        <p className="text-2xl font-bold text-gray-900">{humanCount}</p>
                     </div>
                 </div>
             </div>
@@ -143,15 +142,24 @@ export default function IamSecurityModule({ scanData }: IamSecurityModuleProps) 
                         IAM Principals ({allPrincipals.length})
                     </h3>
                 </div>
-                {formattedTable(allPrincipals, ['Principal Email', 'Type', 'Roles / Origin'], (item: any, index: number) => (
-                    <tr key={`${item.email}-${item.type}-${index}`} className="group hover:bg-gray-50/50">
-                        <td className="px-6 py-4 text-sm font-medium text-gray-900">{item.email}</td>
+                {formattedTable(allPrincipals, ['Principal Identity', 'Type', 'Roles / Origin'], (item: any, index: number) => (
+                    <tr key={`${item.member}-${index}`} className="group hover:bg-gray-50/50">
+                        <td className="px-6 py-4 text-sm font-medium text-gray-900">
+                            <div className="flex flex-col">
+                                <span>{item.email}</span>
+                                <span className="text-[10px] text-gray-400 font-mono underline decoration-gray-200">{item.member}</span>
+                            </div>
+                        </td>
                         <td className="px-6 py-4 text-sm text-gray-600">
-                            <span className={`px-2 py-1 rounded-full text-xs font-semibold ${item.type.includes('Local') ? 'bg-gray-100 text-gray-700' : item.type.includes('Human') ? 'bg-green-100 text-green-800' : 'bg-purple-100 text-purple-800'}`}>
+                            <span className={`px-2 py-1 rounded-full text-xs font-semibold ${item.type === 'User' || item.type === 'Group' ? 'bg-green-100 text-green-800' :
+                                    item.type === 'Service Account' ? 'bg-blue-100 text-blue-800' :
+                                        item.type.includes('Public') ? 'bg-red-100 text-red-800 animate-pulse' :
+                                            'bg-gray-100 text-gray-700'
+                                }`}>
                                 {item.type}
                             </span>
                         </td>
-                        <td className="px-6 py-4 text-sm text-gray-600 font-mono text-xs">{item.roles}</td>
+                        <td className="px-6 py-4 text-sm text-gray-600 font-mono text-xs">{(item.roles || []).join(', ')}</td>
                     </tr>
                 ))}
             </div>

@@ -220,6 +220,9 @@ class ScanService:
         # 3. Parallel Execution of Independent Modules
         logger.info("Starting parallel scan execution...")
         
+        # 3. Parallel Execution of Independent Modules
+        logger.info("Starting parallel scan execution...")
+        
         with concurrent.futures.ThreadPoolExecutor(max_workers=12) as executor:
             future_to_task = {}
             
@@ -271,54 +274,6 @@ class ScanService:
             future_to_task[executor.submit(
                 self._analyze_scc, organization_id
             )] = 'scc_analysis'
-
-            # (Architectural Review logic moved into inventory_scan)
-            
-            future_to_task[executor.submit(
-                self._analyze_billing_health, organization_id
-            )] = 'billing_health'
-
-            # --- IAM & Governance ---
-            future_to_task[executor.submit(
-                self._check_foundation_iam, organization_id
-            )] = 'iam_foundation'
-            
-            if should_run('iam'):
-                future_to_task[executor.submit(
-                    self._analyze_iam_deep, organization_id
-                )] = 'iam_deep'
-                
-                future_to_task[executor.submit(
-                     self._audit_org_admin, organization_id
-                )] = 'iam_admin_audit'
-            
-            future_to_task[executor.submit(
-                self._audit_change_control
-            )] = 'change_control'
-
-            # --- Network & Compute ---
-            if "compute.googleapis.com" in enabled_apis:
-                future_to_task[executor.submit(self._check_legacy_firewall)] = 'legacy_firewall'
-                future_to_task[executor.submit(self._check_gpu_quotas)] = 'gpu_quota'
-                future_to_task[executor.submit(self._scan_compute_resources)] = 'compute_resources'
-                future_to_task[executor.submit(self._analyze_firewall_config)] = 'firewall_analysis'
-            
-            # --- Monitoring ---
-            if should_run('monitoring'):
-                future_to_task[executor.submit(self._analyze_monitoring)] = 'monitoring'
-                
-            # --- SCC ---
-            future_to_task[executor.submit(
-                self._analyze_scc, organization_id
-            )] = 'scc_analysis'
-
-            # --- Architecture ---
-            if should_run('architectural_foundations'):
-                future_to_task[executor.submit(
-                    architect_service.perform_architectural_review, 
-                    self.gcp_client.project_id, 
-                    all_assets
-                )] = 'architectural_review'
 
             # --- Solution Scans ---
             if should_run('finops'):
