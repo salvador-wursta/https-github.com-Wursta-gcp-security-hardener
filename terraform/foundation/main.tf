@@ -21,11 +21,11 @@ resource "google_service_account" "deployment_sa" {
 # Grant deployment SA the necessary roles to deploy infra
 resource "google_project_iam_member" "deployment_sa_roles" {
   for_each = toset([
-    "roles/editor",
-    "roles/iam.securityAdmin",
-    "roles/compute.admin",
     "roles/run.admin",
-    "roles/vpcaccess.admin",
+    "roles/compute.networkAdmin",
+    "roles/iap.admin",
+    "roles/iam.serviceAccountUser",
+    "roles/artifactregistry.writer",
   ])
   project = var.project_id
   role    = each.key
