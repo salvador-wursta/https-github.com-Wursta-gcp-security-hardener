@@ -268,7 +268,7 @@ resource "google_compute_url_map" "default" {
 
 # Google-managed SSL Certificate
 resource "google_compute_managed_ssl_certificate" "default" {
-  name_prefix = "app-cert-"
+  name = "app-cert-nip"
   managed {
     domains = [var.iap_domain]
   }
