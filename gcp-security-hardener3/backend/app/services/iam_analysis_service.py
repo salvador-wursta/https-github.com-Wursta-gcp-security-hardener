@@ -27,6 +27,7 @@ class IamAnalysisService:
         iam_policy = self._get_iam_policy(project_id)
         service_accounts = self._list_service_accounts(project_id)
         external_sa_principals = self._list_external_sa_principals(iam_policy)
+        human_principals = self._list_human_principals(iam_policy)
         
         # Total SA count = SAs defined IN this project + external SAs granted access to it
         all_sa_count = len(service_accounts) + len(external_sa_principals)
@@ -36,6 +37,7 @@ class IamAnalysisService:
             'service_account_keys': self._check_service_account_keys(project_id, service_accounts),
             'default_service_accounts': self._check_default_service_accounts(iam_policy),
             'external_members': self._check_external_members(iam_policy, project_id),
+            'human_principals': human_principals,
             'service_account_count': all_sa_count,
             'local_service_accounts': [
                 {'email': sa['email'], 'display_name': sa.get('displayName', ''), 'source': 'local'}
@@ -73,6 +75,30 @@ class IamAnalysisService:
         except HttpError as e:
             logger.error(f"[IAM ANALYSIS] Failed to list service accounts: {e}")
             return []
+
+    def _list_human_principals(self, policy: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Extract all human users and groups from IAM policy bindings.
+        """
+        seen = set()
+        principals = []
+        for binding in policy.get('bindings', []):
+            for member in binding.get('members', []):
+                if (member.startswith('user:') or member.startswith('group:')) and member not in seen:
+                    seen.add(member)
+                    email = member.split(':', 1)[1]
+                    principal_type = 'User' if member.startswith('user:') else 'Group'
+                    roles = [b['role'] for b in policy.get('bindings', []) if member in b.get('members', [])]
+                    
+                    principals.append({
+                        'email': email,
+                        'member': member,
+                        'type': principal_type,
+                        'roles': roles,
+                        'source': 'iam_policy'
+                    })
+        logger.info(f"[IAM ANALYSIS] Found {len(principals)} human principals in IAM policy")
+        return principals
 
     def _list_external_sa_principals(self, policy: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
@@ -143,23 +169,25 @@ class IamAnalysisService:
                 for key in keys:
                     valid_after = key.get('validAfterTime')
                     if valid_after:
-                        # Parse time (iso format like 2023-10-01T10:00:00Z)
-                        # Remove 'Z' for simple parsing if needed, but datetime.fromisoformat handles it in Py3.11
-                        # Fix: Handle 'Z' explicitly for older Python or specific formats
-                        date_str = valid_after.replace('Z', '+00:00')
-                        created_date = datetime.fromisoformat(date_str)
-                        age_days = (datetime.now(timezone.utc) - created_date).days
-                        
-                        if age_days > 90:
-                            risks.append({
-                                'account': sa_email,
-                                'key_id': key['name'].split('/')[-1],
-                                'age_days': age_days,
-                                'risk_level': 'HIGH',
-                                'recommendation': 'Rotate key immediately (older than 90 days).'
-                            })
-            except HttpError as e:
-                logger.warning(f"[IAM ANALYSIS] Failed to list keys for {sa_email}: {e}")
+                        try:
+                            # Parse time (iso format like 2023-10-01T10:00:00Z)
+                            date_str = valid_after.replace('Z', '+00:00')
+                            created_date = datetime.fromisoformat(date_str)
+                            age_days = (datetime.now(timezone.utc) - created_date).days
+                            
+                            if age_days > 90:
+                                risks.append({
+                                    'account': sa_email,
+                                    'key_id': key['name'].split('/')[-1],
+                                    'age_days': age_days,
+                                    'risk_level': 'HIGH',
+                                    'recommendation': 'Rotate key immediately (older than 90 days).'
+                                })
+                        except Exception as parse_e:
+                            logger.warning(f"[IAM ANALYSIS] Failed to parse key date for {sa_email}: {parse_e}")
+                            
+            except Exception as e:
+                logger.warning(f"[IAM ANALYSIS] Failed to check keys for {sa_email}: {e}")
                 
         return risks
 

@@ -890,41 +890,46 @@ class ScanService:
             iam_service = IamAnalysisService(self.gcp_client)
             iam_data = iam_service.analyze_iam(self.gcp_client.project_id)
             
-            # Narratives
-            narrative_service = IamNarrativeService()
-            iam_data['principal_narratives'] = narrative_service.generate_narratives(iam_data)
+            # Assign early so frontend gets data even if narrative/risk parsing crashes
             result['data'] = iam_data
             
-            # Risks
-            basic = iam_data.get('basic_roles', [])
-            if basic:
-                # Check if any are specifically 'roles/owner' to warrant CRITICAL
-                has_owner = any(r.get('role') == 'roles/owner' for r in basic)
-                risk_level = RiskLevel.CRITICAL if has_owner else RiskLevel.HIGH
+            try:
+                # Narratives
+                narrative_service = IamNarrativeService()
+                iam_data['principal_narratives'] = narrative_service.generate_narratives(iam_data)
                 
-                result['risks'].append(RiskCard(
-                    id="iam_basic_roles",
-                    title="Primitive IAM Roles Detected",
-                    description=f"{len(basic)} users found with Owner/Editor roles. 'Owner' roles are extremely dangerous.",
-                    risk_level=risk_level,
-                    category="iam",
-                    recommendation="Use predefined roles.",
-                    current_state={"count": len(basic)},
-                    affected_resources=[r['member'] for r in basic[:5]]
-                ))
+                # Risks
+                basic = iam_data.get('basic_roles', [])
+                if basic:
+                    # Check if any are specifically 'roles/owner' to warrant CRITICAL
+                    has_owner = any(r.get('role') == 'roles/owner' for r in basic)
+                    risk_level = RiskLevel.CRITICAL if has_owner else RiskLevel.HIGH
+                    
+                    result['risks'].append(RiskCard(
+                        id="iam_basic_roles",
+                        title="Primitive IAM Roles Detected",
+                        description=f"{len(basic)} users found with Owner/Editor roles. 'Owner' roles are extremely dangerous.",
+                        risk_level=risk_level,
+                        category="iam",
+                        recommendation="Use predefined roles.",
+                        current_state={"count": len(basic)},
+                        affected_resources=[r['member'] for r in basic[:5]]
+                    ))
 
-            keys = iam_data.get('service_account_keys', [])
-            if keys:
-                result['risks'].append(RiskCard(
-                    id="iam_sa_keys",
-                    title="Risky Service Account Keys",
-                    description=f"{len(keys)} user-managed keys > 90 days found. User-managed keys are a primary vector for compromise.",
-                    risk_level=RiskLevel.CRITICAL, # Escalated to CRITICAL per user request
-                    category="iam",
-                    recommendation="Rotate keys.",
-                    current_state={"count": len(keys)},
-                    affected_resources=[k['account'] for k in keys[:5]]
-                ))
+                keys = iam_data.get('service_account_keys', [])
+                if keys:
+                    result['risks'].append(RiskCard(
+                        id="iam_sa_keys",
+                        title="Risky Service Account Keys",
+                        description=f"{len(keys)} user-managed keys > 90 days found. User-managed keys are a primary vector for compromise.",
+                        risk_level=RiskLevel.CRITICAL, # Escalated to CRITICAL per user request
+                        category="iam",
+                        recommendation="Rotate keys.",
+                        current_state={"count": len(keys)},
+                        affected_resources=[k['account'] for k in keys[:5]]
+                    ))
+            except Exception as inner_e:
+                logger.error(f"IAM deep scan risk processing failed: {inner_e}")
 
             # MFA / Org Policy - Removed (SCC is Source of Truth)
             # mfa_policy = self.gcp_client.check_org_policy("constraints/iam.allowedPolicyMemberDomains", organization_id)

@@ -35,12 +35,14 @@ export default function IamSecurityModule({ scanData }: IamSecurityModuleProps) 
     const enrichedSaKeys = enrich(saKeys, 'account');
     const enrichedExternal = enrich(externalMembers, 'member');
 
-    // Aggregate all SAs for display
+    // Aggregate all SAs and human principals for display
     const localSAs = iam_analysis.local_service_accounts || [];
     const externalSAs = iam_analysis.external_sa_principals || [];
-    const allSAs = [
-        ...localSAs.map((sa: any) => ({ email: sa.email, type: 'Local (Same Project)', roles: 'Managed in Project' })),
-        ...externalSAs.map((sa: any) => ({ email: sa.email, type: 'External (Cross-Project)', roles: (sa.roles || []).join(', ') || 'Granted via IAM' }))
+    const humanPrincipals = iam_analysis.human_principals || [];
+    const allPrincipals = [
+        ...humanPrincipals.map((hp: any) => ({ email: hp.email, type: `${hp.type} (Human)`, roles: (hp.roles || []).join(', ') || 'Granted via IAM' })),
+        ...localSAs.map((sa: any) => ({ email: sa.email, type: 'Local SA', roles: 'Managed in Project' })),
+        ...externalSAs.map((sa: any) => ({ email: sa.email, type: 'External SA', roles: (sa.roles || []).join(', ') || 'Granted via IAM' }))
     ];
 
     // Helper for risk badge
@@ -138,14 +140,14 @@ export default function IamSecurityModule({ scanData }: IamSecurityModuleProps) 
                 <div className="bg-blue-50 px-6 py-4 border-b border-blue-100 flex justify-between items-center">
                     <h3 className="font-bold text-blue-900 flex items-center gap-2">
                         <Users className="w-5 h-5" />
-                        Service Account Principals ({allSAs.length})
+                        IAM Principals ({allPrincipals.length})
                     </h3>
                 </div>
-                {formattedTable(allSAs, ['Service Account Email', 'Type', 'Roles / Origin'], (item: any, index: number) => (
+                {formattedTable(allPrincipals, ['Principal Email', 'Type', 'Roles / Origin'], (item: any, index: number) => (
                     <tr key={`${item.email}-${item.type}-${index}`} className="group hover:bg-gray-50/50">
                         <td className="px-6 py-4 text-sm font-medium text-gray-900">{item.email}</td>
                         <td className="px-6 py-4 text-sm text-gray-600">
-                            <span className={`px-2 py-1 rounded-full text-xs font-semibold ${item.type.includes('Local') ? 'bg-gray-100 text-gray-700' : 'bg-purple-100 text-purple-800'}`}>
+                            <span className={`px-2 py-1 rounded-full text-xs font-semibold ${item.type.includes('Local') ? 'bg-gray-100 text-gray-700' : item.type.includes('Human') ? 'bg-green-100 text-green-800' : 'bg-purple-100 text-purple-800'}`}>
                                 {item.type}
                             </span>
                         </td>
