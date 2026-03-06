@@ -1,4 +1,8 @@
 terraform {
+  backend "gcs" {
+    bucket = "demot-test-tfstate"
+    prefix = "foundation"
+  }
   required_providers {
     google = {
       source  = "hashicorp/google"
@@ -23,8 +27,11 @@ resource "google_project_iam_member" "deployment_sa_roles" {
   for_each = toset([
     "roles/run.admin",
     "roles/compute.networkAdmin",
+    "roles/compute.loadBalancerAdmin",
     "roles/iap.admin",
     "roles/iam.serviceAccountUser",
+    "roles/iam.serviceAccountAdmin",
+    "roles/resourcemanager.projectIamAdmin",
     "roles/artifactregistry.writer",
   ])
   project = var.project_id

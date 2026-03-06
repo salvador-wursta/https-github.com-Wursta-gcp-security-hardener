@@ -1,4 +1,8 @@
 terraform {
+  backend "gcs" {
+    bucket = "demot-test-tfstate"
+    prefix = "application"
+  }
   required_providers {
     google = {
       source  = "hashicorp/google"
