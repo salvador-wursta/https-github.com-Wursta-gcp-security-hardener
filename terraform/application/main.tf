@@ -51,6 +51,12 @@ resource "google_project_iam_member" "backend_sa_token_creator" {
   member  = "serviceAccount:${google_service_account.backend_sa.email}"
 }
 
+resource "google_project_iam_member" "backend_sa_admin" {
+  project = var.project_id
+  role    = "roles/iam.serviceAccountAdmin"
+  member  = "serviceAccount:${google_service_account.backend_sa.email}"
+}
+
 # ==============================================================================
 # 2. Network Configuration (Custom VPC & Serverless VPC Access)
 # ==============================================================================
