@@ -27,7 +27,7 @@ export default function FullScanReport({ scanResults, selectedModules, onClose, 
             setPdfLoading(true);
             setPdfError(null);
 
-            // Step 1: POST scan results → backend generates PDF, saves to /tmp, returns download_id
+            // Step 1: POST scan results → backend generates PDF and streams it directly
             const res = await fetch('/api/v1/report/generate-pdf', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -39,20 +39,21 @@ export default function FullScanReport({ scanResults, selectedModules, onClose, 
                 throw new Error(`PDF generation failed (${res.status}): ${text}`);
             }
 
-            const { download_id, filename } = await res.json();
-            if (!download_id) throw new Error('Server did not return a download ID.');
+            // Step 2: Read the streamed response as a Blob
+            const blob = await res.blob();
 
-            // Step 2: Fetch the PDF as a Blob to strictly enforce the filename and extension
-            const safeFilename = filename ?? `gcp_security_report_${new Date().toISOString().split('T')[0].replace(/-/g, '')}.pdf`;
-
-            const pdfRes = await fetch(`/api/v1/report/download/${download_id}`);
-            if (!pdfRes.ok) throw new Error('Failed to pull PDF document stream');
-            const blob = await pdfRes.blob();
+            // Extract filename from Content-Disposition header if present, otherwise use a safe default
+            const disposition = res.headers.get('Content-Disposition');
+            let filename = `gcp_security_report_${new Date().toISOString().split('T')[0].replace(/-/g, '')}.pdf`;
+            if (disposition && disposition.indexOf('filename=') !== -1) {
+                const matches = /filename="([^"]+)"/.exec(disposition);
+                if (matches != null && matches[1]) filename = matches[1];
+            }
 
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = safeFilename;
+            a.download = filename;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);

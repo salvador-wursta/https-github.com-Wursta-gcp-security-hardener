@@ -94,7 +94,7 @@ export default function ReportingInterface({ scanResults, jitToken, onClose }: R
             if (clientData?.companyName) params.set('org_name', clientData.companyName);
             if (clientData?.scannerName) params.set('analyst_name', clientData.scannerName);
 
-            // Step 1: POST scan results → backend generates PDF, saves to /tmp, returns download_id
+            // Step 1: POST scan results → backend generates PDF and streams it directly
             const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
             const res = await fetch(
                 `${backendUrl}/api/v1/report/generate-pdf?${params.toString()}`,
@@ -110,20 +110,21 @@ export default function ReportingInterface({ scanResults, jitToken, onClose }: R
                 throw new Error(`PDF generation failed (${res.status}): ${text}`);
             }
 
-            const { download_id, filename: dlFilename } = await res.json();
-            if (!download_id) throw new Error('Server did not return a download ID.');
+            // Step 2: Read the streamed response as a Blob
+            const blob = await res.blob();
 
-            // Fetch the PDF as a Blob to strictly enforce the filename and extension on the client
-            const safeFilename = dlFilename ?? `gcp_security_report_${new Date().toISOString().split('T')[0].replace(/-/g, '')}.pdf`;
-
-            const pdfRes = await fetch(`/api/v1/report/download/${download_id}`);
-            if (!pdfRes.ok) throw new Error('Failed to pull PDF document stream');
-            const blob = await pdfRes.blob();
+            // Extract filename from Content-Disposition header if present, otherwise use a safe default
+            const disposition = res.headers.get('Content-Disposition');
+            let filename = `gcp_security_report_${new Date().toISOString().split('T')[0].replace(/-/g, '')}.pdf`;
+            if (disposition && disposition.indexOf('filename=') !== -1) {
+                const matches = /filename="([^"]+)"/.exec(disposition);
+                if (matches != null && matches[1]) filename = matches[1];
+            }
 
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = safeFilename;
+            a.download = filename;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);

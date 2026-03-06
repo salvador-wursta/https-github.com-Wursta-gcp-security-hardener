@@ -53,107 +53,6 @@ def _sanitize_name(raw: str, max_len: int = 21) -> str:
     return slug[:max_len].rstrip("-") or "client"
 
 
-def ensure_token_creator(sa_email: str) -> None:
-    """
-    Ensures the current ADC identity (developer email locally, Cloud Run
-    runtime SA in production) has roles/iam.serviceAccountTokenCreator
-    on the given scanner SA.
-
-    This MUST be called every time a scanner SA is activated — not just
-    when it is first created — so that existing SAs work correctly too.
-
-    This is a best-effort call: it logs failures but never raises, so the
-    caller (session/activate) is never blocked.
-    """
-    try:
-        credentials, project_id = _get_credentials_without_firebase()
-    except Exception as e:
-        print(f"[ensure_token_creator] ADC resolution failed: {e}")
-        return
-
-    # ── Resolve the current ADC caller identity ──────────────────────────────
-    # Priority 1: SA attributes (works in Cloud Run / Workload Identity)
-    caller_email = (
-        getattr(credentials, "service_account_email", None)
-        or getattr(credentials, "signer_email", None)
-        or getattr(credentials, "_service_account_email", None)
-    )
-
-    # Priority 2: gcloud CLI active account (works locally)
-    if not caller_email or caller_email == "default":
-        try:
-            import subprocess as _sp
-            res = _sp.run(
-                ["gcloud", "config", "get-value", "account"],
-                capture_output=True, text=True, timeout=5
-            )
-            gcloud_account = res.stdout.strip()
-            if gcloud_account and gcloud_account != "(unset)":
-                caller_email = gcloud_account
-        except Exception as gcloud_err:
-            print(f"[ensure_token_creator] gcloud account lookup failed: {gcloud_err}")
-
-    # Priority 3: tokeninfo API (OAuth user credentials)
-    if not caller_email:
-        try:
-            from google.auth.transport.requests import Request
-            import requests as _req
-            credentials.refresh(Request())
-            res = _req.get(
-                f"https://www.googleapis.com/oauth2/v3/tokeninfo?access_token={credentials.token}",
-                timeout=5,
-            )
-            if res.status_code == 200:
-                caller_email = res.json().get("email")
-        except Exception as tok_err:
-            print(f"[ensure_token_creator] tokeninfo lookup failed: {tok_err}")
-
-    if not caller_email:
-        print("[ensure_token_creator] Could not resolve ADC identity — skipping TokenCreator grant.")
-        return
-
-    member_type = "serviceAccount" if caller_email.endswith(".gserviceaccount.com") else "user"
-    member_str = f"{member_type}:{caller_email}"
-
-    # ── Apply the IAM binding ─────────────────────────────────────────────────
-    try:
-        # Resolve the host project the SA lives in (extracted from the SA email)
-        # sa_email format: <account-id>@<project-id>.iam.gserviceaccount.com
-        sa_project = sa_email.split("@")[-1].replace(".iam.gserviceaccount.com", "")
-        full_resource = f"projects/{sa_project}/serviceAccounts/{sa_email}"
-
-        iam = discovery.build("iam", "v1", credentials=credentials, cache_discovery=False)
-
-        policy = iam.projects().serviceAccounts().getIamPolicy(resource=full_resource).execute()
-        if "bindings" not in policy:
-            policy["bindings"] = []
-
-        role = "roles/iam.serviceAccountTokenCreator"
-        binding_found = False
-        for binding in policy["bindings"]:
-            if binding.get("role") == role:
-                binding_found = True
-                if member_str not in binding.get("members", []):
-                    binding["members"].append(member_str)
-                    print(f"[ensure_token_creator] Added {member_str} to existing TokenCreator binding on {sa_email}")
-                else:
-                    print(f"[ensure_token_creator] {member_str} already has TokenCreator on {sa_email} — no change needed.")
-                break
-
-        if not binding_found:
-            policy["bindings"].append({"role": role, "members": [member_str]})
-            print(f"[ensure_token_creator] Created new TokenCreator binding for {member_str} on {sa_email}")
-
-        iam.projects().serviceAccounts().setIamPolicy(
-            resource=full_resource,
-            body={"policy": policy}
-        ).execute()
-        print(f"[ensure_token_creator] ✓ TokenCreator IAM binding applied for {member_str} on {sa_email}")
-
-    except Exception as e:
-        print(f"[ensure_token_creator] Failed to set TokenCreator on {sa_email}: {e}")
-
-
 def create_session_identity(domain: str) -> dict:
     """
     Creates a brand-new per-customer scanner Service Account in OUR GCP project.
@@ -232,6 +131,9 @@ def create_session_identity(domain: str) -> dict:
         print(f"[identity_service] SA already exists: {sa_email}")
     except Exception:
         print(f"[identity_service] Creating new SA: {sa_email}")
+        from googleapiclient.errors import HttpError
+        import random, string
+        
         try:
             iam.projects().serviceAccounts().create(
                 name=f"projects/{project_id}",
@@ -242,6 +144,30 @@ def create_session_identity(domain: str) -> dict:
             ).execute()
             created = True
             print(f"[identity_service] Created: {sa_email}")
+        except HttpError as create_err:
+            if create_err.resp.status == 409:
+                # 409 means it exists in a "soft-deleted" state inside GCP and the name is blocked.
+                suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+                account_id = f"{account_id[:25]}-{suffix}"
+                sa_email = f"{account_id}@{project_id}.iam.gserviceaccount.com"
+                full_resource = f"projects/{project_id}/serviceAccounts/{sa_email}"
+                print(f"[identity_service] 409 Conflict. Soft-deleted SA blocking name. Retrying with suffix: {sa_email}")
+                
+                iam.projects().serviceAccounts().create(
+                    name=f"projects/{project_id}",
+                    body={
+                        "accountId": account_id,
+                        "serviceAccount": {"displayName": display_name},
+                    },
+                ).execute()
+                created = True
+                print(f"[identity_service] Re-Created successfully: {sa_email}")
+            else:
+                raise RuntimeError(
+                    f"IAM SA creation failed for {account_id!r} in project {project_id!r}. "
+                    f"Ensure your bootstrap identity has roles/iam.serviceAccountAdmin. "
+                    f"Detail: {create_err}"
+                ) from create_err
         except Exception as create_err:
             raise RuntimeError(
                 f"IAM SA creation failed for {account_id!r} in project {project_id!r}. "

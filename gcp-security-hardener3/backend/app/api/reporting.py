@@ -1,29 +1,20 @@
 """
-Reporting API — PDF Generation (Two-Step Server-Side Download)
+Reporting API — PDF Generation (Single-Step Streaming)
 
 Architecture:
-  Step 1: POST /generate-pdf  → generates PDF, saves to /tmp/<uuid>.pdf, returns {"download_id": "<uuid>"}
-  Step 2: GET  /download/<download_id> → browser navigates here directly → native file download
-
-This eliminates all browser-side blob/URL.createObjectURL/header issues that caused
-the "weird file" problem. Browser native download is always reliable.
+  POST /generate-pdf → directly generates and streams the PDF back to the client.
+  This avoids all Cloud Run multi-instance file-not-found issues that occur
+  when saving to /tmp across Load Balancers.
 """
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.responses import StreamingResponse
 from typing import List, Dict, Any, Optional
 from app.services.reporting_service import ReportingService
 import logging
 import io
-import os
-import uuid
-import tempfile
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-# ── Temp file registry: download_id → file path ──────────────────────────────
-# Simple in-memory map; files are cleaned up after one download or after 10 min.
-_pending_downloads: Dict[str, str] = {}
 
 
 @router.post("/generate-pdf")
@@ -33,97 +24,33 @@ async def generate_pdf(
     analyst_name: Optional[str] = Query(default=""),
 ):
     """
-    Step 1: Generate the PDF and save it to a temp file.
-    Returns a JSON object with a download_id the frontend uses
-    to trigger the actual file download via a GET request.
-
+    Generate the PDF and synchronously stream it back to the client.
     No JIT session required — scan data comes in the request body.
     """
     if not scan_results:
         raise HTTPException(status_code=400, detail="No scan results provided.")
-
     try:
         service = ReportingService()
         pdf_bytes = service.generate_pdf_report(
-            scan_results,
-            org_name=org_name or "",
-            analyst_name=analyst_name or "",
+            scan_results, 
+            org_name=org_name or "", 
+            analyst_name=analyst_name or ""
         )
-
-        from datetime import datetime
-        date_str = datetime.utcnow().strftime('%Y%m%d')
-        filename = f"gcp_security_report_{date_str}.pdf"
-
-        # Save to a uniquely-named temp file
-        download_id = str(uuid.uuid4())
-        tmp_path = os.path.join(tempfile.gettempdir(), f"gcp_report_{download_id}.pdf")
-        with open(tmp_path, "wb") as f:
-            f.write(pdf_bytes)
-
-        _pending_downloads[download_id] = (tmp_path, filename)
-        logger.info(f"[reporting] PDF ready: {filename} ({len(pdf_bytes)} bytes) | id={download_id}")
-
-        return {"download_id": download_id, "filename": filename, "size": len(pdf_bytes)}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        import traceback
-        logger.error(f"[reporting] PDF generation failed: {e}")
-        logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"PDF generation failed: {str(e)}")
-
-
-@router.get("/download/{download_id}")
-async def download_pdf(download_id: str):
-    """
-    Step 2: Serve the pre-generated PDF using the browser's native file download.
-    The frontend navigates to this URL (window.open or anchor href) — no fetch(), no blob.
-    """
-    entry = _pending_downloads.get(download_id)
-    if not entry:
-        raise HTTPException(status_code=404, detail="Download not found or already downloaded.")
-
-    tmp_path, filename = entry
-
-    if not os.path.exists(tmp_path):
-        _pending_downloads.pop(download_id, None)
-        raise HTTPException(status_code=404, detail="PDF file no longer exists on server.")
-
-    # Remove from registry so it can't be downloaded twice (clean up after use)
-    _pending_downloads.pop(download_id, None)
-
-    logger.info(f"[reporting] Serving download: {filename} from {tmp_path}")
-
-    return FileResponse(
-        path=tmp_path,
-        media_type="application/pdf",
-        filename=filename,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
-
-
-# ── Legacy streaming endpoint (kept for backward compatibility) ───────────────
-@router.post("/generate-pdf-stream")
-async def generate_pdf_stream(
-    scan_results: List[Dict[str, Any]],
-    org_name: Optional[str] = Query(default=""),
-    analyst_name: Optional[str] = Query(default=""),
-):
-    """Kept for compatibility. Prefer /generate-pdf + /download/<id>."""
-    if not scan_results:
-        raise HTTPException(status_code=400, detail="No scan results provided.")
-    try:
-        service = ReportingService()
-        pdf_bytes = service.generate_pdf_report(scan_results, org_name=org_name or "", analyst_name=analyst_name or "")
+        
         from datetime import datetime
         filename = f"gcp_security_report_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
+        
+        logger.info(f"[reporting] PDF streamed to client: {filename} ({len(pdf_bytes)} bytes)")
+        
         return StreamingResponse(
             io.BytesIO(pdf_bytes),
             media_type="application/pdf",
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
     except Exception as e:
+        import traceback
+        logger.error(f"[reporting] PDF generation/stream failed: {e}")
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
 
